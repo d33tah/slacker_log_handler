@@ -35,7 +35,7 @@ class NoStacktraceFormatter(Formatter):
 
 class SlackerLogHandler(Handler):
     def __init__(self, api_key, channel, stack_trace=True, username='Python logger', icon_url=None, icon_emoji=None,
-                 fail_silent=False):
+                 fail_silent=False, message_in_attachments=True):
         Handler.__init__(self)
         self.formatter = NoStacktraceFormatter()
 
@@ -47,17 +47,25 @@ class SlackerLogHandler(Handler):
         self.icon_url = icon_url
         self.icon_emoji = icon_emoji if (icon_emoji or icon_url) else DEFAULT_EMOJI
         self.channel = channel
+        self.message_in_attachments = message_in_attachments
         if not self.channel.startswith('#') and not self.channel.startswith('@'):
             self.channel = '#' + self.channel
 
     def build_msg(self, record):
         return six.text_type(self.format(record))
 
-    def build_trace(self, record, fallback):
-        trace = {
+    def build_attachment(self, fallback, levelno, text=None):
+        ret = {
             'fallback': fallback,
-            'color': COLORS.get(self.level, INFO_COLOR)
+            'color': COLORS.get(levelno, INFO_COLOR)
         }
+        if text is not None:
+            ret['text'] = text
+        return ret
+
+    def build_trace(self, record, fallback):
+
+        trace = self.build_attachment(fallback, record.levelno)
 
         if record.exc_info:
             trace['text'] = '\n'.join(traceback.format_exception(*record.exc_info))
@@ -67,15 +75,15 @@ class SlackerLogHandler(Handler):
     def emit(self, record):
         message = self.build_msg(record)
 
+        attachments = []
+        if self.message_in_attachments:
+            attachments.append(self.build_attachment(message, record.levelno, message))
         if self.stack_trace:
-            trace = self.build_trace(record, fallback=message)
-            attachments = json.dumps([trace])
-        else:
-            attachments = None
+            attachments.append(self.build_trace(record, fallback=message))
 
         try:
             self.slacker.chat.post_message(
-                text=message,
+                text=message if not self.message_in_attachments else '',
                 channel=self.channel,
                 username=self.username,
                 icon_url=self.icon_url,
